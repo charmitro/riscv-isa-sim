@@ -10,48 +10,54 @@ uint64_t frac = fracF64UI(a);
 bool inexact = false;
 bool invalid = false;
 
-if (exp == 0) {
-  inexact = (frac != 0);
+/* detect the non-normal cases */
+bool is_subnorm    = (exp == 0 && frac != 0);
+bool is_zero       = (exp == 0 && frac == 0);
+bool is_nan_or_inf = (exp == 0x7ff);
+
+/* Restore implicit bit */
+frac |= 1ull << 52;
+/* Undo the offset-binary */
+int true_exp  = exp - 1023;
+
+/* Detect trivial cases for normal numbers */
+/* Bits will be 'multiplied' out */
+bool is_too_large = true_exp >= 84;
+/* Bits will be 'divided' out */
+bool is_too_small = true_exp < 0;
+
+if (is_zero) {
   frac = 0;
-} else if (exp == 0x7ff) {
-  /* inf or NaN */
+} else if (is_subnorm) {
+  inexact = true;
+  frac    = 0;
+} else if (is_nan_or_inf) {
   invalid = true;
-  frac = 0;
+  frac   = 0;
+} else if (is_too_large) {
+  invalid = true;
+  frac    =  0;
+} else if (is_too_small) {
+  inexact = true;
+  frac    = 0;
 } else {
-  int true_exp = exp - 1023;
-  int shift = true_exp - 52;
+  /* perform the exponentation on the fixed-point
+     mantissa and extract the integer part */
+  uint128_t fixedpoint = (uint128_t)frac << true_exp;
+  frac                 = fixedpoint >> 52;
+  uint64_t mantissa    = fixedpoint & UINT64_C(0xFFFFFFFFFFFFF);
 
-  /* Restore implicit bit.  */
-  frac |= 1ull << 52;
-
-  /* Shift the fraction into place.  */
-  if (shift >= 64) {
-    /* The fraction is shifted out entirely.  */
-    frac = 0;
-  } else  if ((shift >= 0) && (shift < 64)) {
-    /* The number is so large we must shift the fraction left.  */
-    frac <<= shift;
-  } else if ((shift > -64) && (shift < 0)) {
-    /* Normal case -- shift right and notice if bits shift out.  */
-    inexact = (frac << (64 + shift)) != 0;
-    frac >>= -shift;
-  } else {
-    /* The fraction is shifted out entirely.  */
-    frac = 0;
-    inexact = true;
-  }
-
-  /* Handle overflows */
-  if (true_exp > 31 || frac > (sign ? 0x80000000ull : 0x7fffffff)) {
-    /* Overflow, for which this operation raises invalid.  */
-    invalid = true;
-    inexact = false;  /* invalid takes precedence */
-  }
-
-  /* Honor the sign.  */
-  if (sign) {
+  /* apply the sign bit */
+  if (sign)
     frac = -frac;
-  }
+
+  /* raise FP exception flags, honoring the precedence
+     of nV > nX */
+  if (true_exp > 31)
+    invalid = true;
+  else if (mantissa != 0)
+    inexact = true;
+
 }
 
 WRITE_RD(sext32(frac));
