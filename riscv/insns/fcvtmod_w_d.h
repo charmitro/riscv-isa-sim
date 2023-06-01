@@ -47,17 +47,16 @@ if (is_zero) {
   frac                 = fixedpoint >> 52;
   uint64_t mantissa    = fixedpoint & UINT64_C(0xFFFFFFFFFFFFF);
 
-  /* apply the sign bit */
-  if (sign)
-    frac = -frac;
-
   /* raise FP exception flags, honoring the precedence
      of nV > nX */
-  if (true_exp > 31)
+  if (true_exp > 31 || frac > (sign ? 0x80000000ull : 0x7fffffff))
     invalid = true;
   else if (mantissa != 0)
     inexact = true;
 
+  /* apply the sign bit */
+  if (sign)
+    frac = -frac;
 }
 
 WRITE_RD(sext32(frac));
